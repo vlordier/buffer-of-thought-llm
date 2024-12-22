@@ -9,8 +9,24 @@ from typing import Any, Callable, Dict, List
 import aioboto3
 import aiohttp
 import numpy as np
-import ollama
-import torch
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+HAS_OLLAMA = os.getenv('ENABLE_OLLAMA', 'true').lower() == 'true'
+if HAS_OLLAMA:
+    try:
+        import ollama
+    except ImportError:
+        HAS_OLLAMA = False
+
+HAS_TORCH = os.getenv('ENABLE_TORCH', 'true').lower() == 'true'
+if HAS_TORCH:
+    try:
+        import torch
+    except ImportError:
+        HAS_TORCH = False
 from openai import (
     APIConnectionError,
     AsyncAzureOpenAI,
@@ -25,7 +41,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .base import BaseKVStorage
 from .utils import compute_args_hash, wrap_embedding_func_with_attrs
@@ -231,23 +246,6 @@ async def bedrock_complete_if_cache(
         return response["output"]["message"]["content"][0]["text"]
 
 
-@lru_cache(maxsize=1)
-def initialize_hf_model(model_name):
-    hf_tokenizer = AutoTokenizer.from_pretrained(
-        model_name,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    hf_model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    if hf_tokenizer.pad_token is None:
-        hf_tokenizer.pad_token = hf_tokenizer.eos_token
-
-    return hf_model, hf_tokenizer
-
 
 async def hf_model_if_cache(
     model,
@@ -336,6 +334,8 @@ async def ollama_model_if_cache(
     history_messages=[],
     **kwargs,
 ) -> str:
+    if not HAS_OLLAMA:
+        raise ImportError("ollama package is required for ollama_model_if_cache. Please install it with 'pip install ollama'")
     kwargs.pop("max_tokens", None)
     kwargs.pop("response_format", None)
 
@@ -756,6 +756,9 @@ async def bedrock_embedding(
 
 
 async def hf_embedding(texts: list[str], tokenizer, embed_model) -> np.ndarray:
+    if not HAS_TORCH:
+        raise ImportError("torch package is required for hf_embedding. Please install it with 'pip install torch'")
+        
     input_ids = tokenizer(
         texts,
         return_tensors="pt",
@@ -769,6 +772,9 @@ async def hf_embedding(texts: list[str], tokenizer, embed_model) -> np.ndarray:
 
 
 async def ollama_embedding(texts: list[str], embed_model) -> np.ndarray:
+    if not HAS_OLLAMA:
+        raise ImportError("ollama package is required for ollama_embedding. Please install it with 'pip install ollama'")
+        
     embed_text = []
     for text in texts:
         data = ollama.embeddings(model=embed_model, prompt=text)

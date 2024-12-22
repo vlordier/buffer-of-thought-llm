@@ -1,9 +1,9 @@
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from bot_pipeline import BoT
+from bot_pipeline import BoT, BotConfig
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     task = args.task_name
     api_key = args.api_key
     model_id = args.model_id
-    now = datetime.now(tz=datetime.UTC)
+    now = datetime.now(tz=timezone.utc)
     timestamp_str = now.strftime("%Y-%m-%d-%H:%M:%S")
     output_dir = Path("test_results")
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -61,12 +61,15 @@ if __name__ == "__main__":
     user_prompt = benchmark_dict[task]
     path = path_dict[task]
     problem_id = buffer_dict[task]
+    config = BotConfig(
+        model_id=model_id,
+        api_key=api_key,
+        verification_enabled=True
+    )
     test_bot = BoT(
         user_input=None,
         problem_id=problem_id,
-        api_key=api_key,
-        model_id=model_id,
-        need_check=True,
+        config=config
     )
     with Path(path).open() as f:
         for line in f:

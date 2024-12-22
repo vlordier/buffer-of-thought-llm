@@ -3,12 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
-import transformers
 from openai import OpenAI
 
 from meta_buffer import MetaBuffer
-from meta_buffer_utilis import extract_and_execute_code, meta_distiller_prompt
+from meta_buffer_utils import extract_and_execute_code, meta_distiller_prompt
 from test_templates import checkmate, game24, word_sorting
 
 
@@ -34,17 +32,8 @@ class Pipeline:
         self.local = False
         self.base_url = base_url
         self.model_id = model_id
-        if api_key is None:
-            self.local = True
-            self.pipeline = transformers.pipeline(
-                "text-generation",
-                model=self.model_id,
-                model_kwargs={"torch_dtype": torch.bfloat16},
-                device_map="auto",
-            )
-        else:
-            self.api = True
-            self.api_key = api_key
+        self.api = True
+        self.api_key = api_key
 
     def get_respond(self, meta_prompt: str, user_prompt: str) -> str:
         """
