@@ -81,10 +81,8 @@ class MetaBuffer:
         return self.rag.query(query_text, param=QueryParam(mode="hybrid"))
 
     def dynamic_update(self, thought_template: str) -> None:
-        prompt = """
-Find most relevant thought template in the MetaBuffer according to the given thought template, and Determine whether there is a fundamental difference in the problem-solving approach between this and the most similar thought template in MetaBuffer. If there is, output "True." If there is no fundamental difference, or if the two thought templates are highly similar, output "False."
-"""
-        query_text = prompt + thought_template
+        from prompts import SIMILARITY_CHECK_PROMPT
+        query_text = SIMILARITY_CHECK_PROMPT.format(thought_template=thought_template)
         response = self.rag.query(query_text, param=QueryParam(mode="hybrid"))
         if self.extract_similarity_decision(response):
             self.rag.insert(thought_template)
