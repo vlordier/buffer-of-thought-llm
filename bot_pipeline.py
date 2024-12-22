@@ -6,9 +6,14 @@ from pathlib import Path
 from openai import OpenAI
 
 from meta_buffer import MetaBuffer
-from meta_buffer_utils import extract_and_execute_code, meta_distiller_prompt
+from meta_buffer_utils import extract_and_execute_code
 from test_templates import checkmate, game24, word_sorting
-
+from prompts import (
+    META_DISTILLER_PROMPT,
+    BUFFER_PROMPT,
+    INSPECTOR_PROMPT,
+    REASONER_PROMPT,
+)
 
 class Pipeline:
     """Pipeline for handling model interactions."""
@@ -26,62 +31,39 @@ class Pipeline:
             model_id: The model identifier
             api_key: Optional API key for authentication
             base_url: Base URL for API requests
-
         """
-        self.api = False
-        self.local = False
-        self.base_url = base_url
         self.model_id = model_id
-        self.api = True
-        self.api_key = api_key
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
 
-    def get_respond(self, meta_prompt: str, user_prompt: str) -> str:
+    def get_respond(self, prompt_template, **kwargs) -> str:
         """
         Get model response for given prompts.
 
         Args:
-            meta_prompt: System/meta prompt
-            user_prompt: User input prompt
+            prompt_template: LangChain ChatPromptTemplate
+            **kwargs: Keywords arguments for prompt template formatting
 
         Returns:
             Model generated response
-
         """
-        if self.api:
-            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-            completion = client.chat.completions.create(
-                model=self.model_id,
-                messages=[
-                    {"role": "system", "content": meta_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            return completion.choices[0].message.content
-        messages = [
-            {"role": "system", "content": meta_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        prompt = self.pipeline.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
+        messages = prompt_template.format_messages(**kwargs)
+        formatted_messages = []
+        for msg in messages:
+            # Map LangChain message types to OpenAI roles
+            role = {
+                "human": "user",
+                "system": "system",
+                "ai": "assistant"
+            }.get(msg.type, "user")  # Default to user if unknown type
+            formatted_messages.append({
+                "role": role,
+                "content": msg.content
+            })
+        completion = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=formatted_messages,
         )
-
-        terminators = [
-            self.pipeline.tokenizer.eos_token_id,
-            self.pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-        ]
-
-        outputs = self.pipeline(
-            prompt,
-            max_new_tokens=2048,
-            eos_token_id=terminators,
-            do_sample=True,
-            temperature=0.4,
-            top_p=0.9,
-        )
-        return outputs[0]["generated_text"][len(prompt) :]
+        return completion.choices[0].message.content
 
 
 # Constants for problem types
@@ -90,6 +72,8 @@ PROBLEM_TYPE_CHECKMATE = 1
 PROBLEM_TYPE_WORD_SORTING = 2
 
 MAX_RETRY_COUNT = 3
+
+
 @dataclass
 class BotConfig:
     """Configuration for BoT class."""
@@ -151,8 +135,8 @@ class BoT:
 
     def problem_distillation(self) -> None:
         self.distilled_information = self.pipeline.get_respond(
-            meta_distiller_prompt,
-            self.user_input,
+            META_DISTILLER_PROMPT,
+            query=self.user_input
         )
 
     def buffer_retrieve(self) -> None:
@@ -165,11 +149,11 @@ class BoT:
             self.thought_template = word_sorting
 
     def buffer_instantiation(self) -> None:
-        self.buffer_prompt = """
-        You are an expert in problem analysis and can apply previous problem-solving approaches to new issues. The user will provide a specific task description and a meta buffer that holds multiple thought templates that will help to solve the problem. Your goal is to first extract most relevant thought template from meta buffer, analyze the user's task and generate a specific solution based on the thought template. Give a final answer that is easy to extract from the text.
-        """
-        prompt_text = self.buffer_prompt + self.distilled_information
-        self.result = self.meta_buffer.retrieve_and_instantiate(prompt_text)
+        prompt = BUFFER_PROMPT.format_messages(
+            task=self.distilled_information,
+            meta_buffer=self.meta_buffer.get_content()
+        )
+        self.result = self.meta_buffer.retrieve_and_instantiate(prompt[1].content)
 
     def buffer_manager(self) -> None:
         self.problem_solution_pair = self.user_input + self.result
@@ -205,47 +189,29 @@ It should be noted that you should only return the thought template without any 
     def reasoner_instantiation(self) -> None:
         # Temporay using selection method to select answer extract method
         problem_id_list = [0, 1, 2]
-        self.instantiation_instruct = """
-You are an expert in problem analysis and can apply previous problem-solving approaches to new issues. The user will provide a specific task description and a thought template. Your goal is to analyze the user's task and generate a specific solution based on the thought template. If the instantiated solution involves Python code, only provide the code and let the compiler handle it. If the solution does not involve code, provide a final answer that is easy to extract from the text.
-It should be noted that all the python code should be within one code block, the answer should not include more than one code block! And strictly follow the thought-template to instantiate the python code but you should also adjust the input parameter according to the user input!
-        """
-
-        self.formated_input = f"""
-Distilled information:
+        self.result = self.pipeline.get_respond(
+            prompt_template=REASONER_PROMPT,
+            query=f"""
 {self.distilled_information}
 User Input:
 {self.user_input}
 Thought template:
-{self.thought_template}
-
-Instantiated Solution:
-Please analyze the above user task description and thought template, and generate a specific, detailed solution. If the solution involves Python code, only provide the code. If not, provide a clear and extractable final answer.
-        """
-        self.inspector_prompt = """
-You are an excellent python programming master who are proficient in analyzing and editing python code, and you are also good at understanding the real-world problem. Your task is:
-1. Analyze the given python code
-2. Edit the input code to make sure the edited code is correct and could run and solve the problem correctly.
-Your respond should follow the format below:
-```python
-## Edited code here
-```
-        """
-        self.result = self.pipeline.get_respond(
-            self.instantiation_instruct,
-            self.formated_input,
+{self.thought_template}"""
         )
         if self.problem_id in problem_id_list:
             self.final_result, code_str = extract_and_execute_code(self.result)
             if self.need_check:
                 self.count = 0
-                self.inter_input = f"""
-                User_input:{self.user_input}
-                {code_str}
-                {self.final_result}
-                """
+                prompt = INSPECTOR_PROMPT.format_messages(
+                    user_input=self.user_input,
+                    code=code_str,
+                    result=self.final_result
+                )
+                self.inter_input = prompt[1].content
                 self.inter_result = self.final_result
-                while (
-                    "An error occurred" in self.inter_result or self.inter_result in ("", "None")
+                while "An error occurred" in self.inter_result or self.inter_result in (
+                    "",
+                    "None",
                 ):
                     self.inter_input = self.pipeline.get_respond(
                         self.inspector_prompt,

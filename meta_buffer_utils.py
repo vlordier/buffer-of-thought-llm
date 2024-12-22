@@ -5,7 +5,6 @@ import re
 import sys
 
 
-
 def extract_and_execute_code(text: str) -> tuple[str, str | None]:
     """
     Extract and execute Python code from markdown-style text.
@@ -93,3 +92,16 @@ def extract_answer(text: str) -> str | None:
 
     # If a match is found, return the content; otherwise, return None
     return match.group(1).strip() if match else None
+
+
+def count_tokens(text: str | None) -> int:
+    if text is None:
+        return 0
+    return len(text)
+
+def truncate_text(text: str | None, max_tokens: int) -> str | None:
+    if text is None:
+        return None
+    if len(text) <= max_tokens:
+        return text
+    return text[:max_tokens]

@@ -82,6 +82,7 @@ class MetaBuffer:
 
     def dynamic_update(self, thought_template: str) -> None:
         from prompts import SIMILARITY_CHECK_PROMPT
+
         query_text = SIMILARITY_CHECK_PROMPT.format(thought_template=thought_template)
         response = self.rag.query(query_text, param=QueryParam(mode="hybrid"))
         if self.extract_similarity_decision(response):

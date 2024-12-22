@@ -64,12 +64,12 @@ if __name__ == "__main__":
     config = BotConfig(
         model_id=model_id,
         api_key=api_key,
-        verification_enabled=True
+        verification_enabled=True,
     )
     test_bot = BoT(
         user_input=None,
         problem_id=problem_id,
-        config=config
+        config=config,
     )
     with Path(path).open() as f:
         for line in f:

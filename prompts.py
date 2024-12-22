@@ -1,43 +1,83 @@
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 
-META_DISTILLER_TEMPLATE = """
-As a highly professional and intelligent expert in information distillation, you excel at extracting essential information to solve problems from user input queries. You adeptly transform this extracted information into a suitable format based on the respective type of the issue. If the problem can be generalized to a higher level to solve multiple issues, further analysis and explanation will be provided upon your next response.
+# Meta Distiller Prompt
+META_DISTILLER_SYSTEM = """As a highly professional and intelligent expert in information distillation, you excel at extracting essential information to solve problems from user input queries. You adeptly transform this extracted information into a suitable format based on the respective type of the issue."""
 
-Please categorize and extract the crucial information required to solve the problem from the user's input query. Combining these two elements will generate distilled information. Subsequently, deliver this distilled information, based on the problem type, to your downstream meta planner. The problem type should belong to one of the six categories mentioned above, and the distilled information should include:
+META_DISTILLER_HUMAN = """Please analyze the following query and provide:
 
-1. Values and information of key variables extracted from user input, which will be handed over to the respective expert for task resolution, ensuring all essential information required to solve the problem is provided.
-2. The objective of the problem and corresponding constraints.
-3. Extend the problem based on 1 and 2, propose a meta problem that can address the user query and handle more input and output variations. Incorporate the real-world scenario of the extended problem along with the types of key variables and information constraints from the original problem to restrict the key variables in the extended problem. After that, use the user query input key information as input to solve the problem as an example.
-4. Try to transform the problem into a python algorithm problem, and provide the input parameters.
-5. Your task is to distill the problem, you shouldn't give the final result or possible solution in your respond.
+1. Key information: Extract all essential variables and data
+2. Restrictions: Note any real-world rules (e.g. operator precedence, parentheses)
+3. Distilled task: Core problem statement
+4. Python transformation: Input parameter names and types (if applicable)
+5. Expected answer format (if specific format required)
 
-Distilled Information:
+Query: {query}"""
 
-1. Key information:
+META_DISTILLER_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(META_DISTILLER_SYSTEM),
+    HumanMessagePromptTemplate.from_template(META_DISTILLER_HUMAN)
+])
 
-2. Restriction: (It should be noted that the answer should strictly follow the real-world rule such as in arithmatic equation, the Priority of operator, the need of parentheses etc. So according to the distilled information, emphasize the real-world rules that need to be followed within the problem.)
+# Buffer Prompt
+BUFFER_SYSTEM = """You are an expert in problem analysis and can apply previous problem-solving approaches to new issues."""
 
-3. Distilled task:
+BUFFER_HUMAN = """Task Description: {task}
+Meta Buffer Content: {meta_buffer}
 
-4. Python transformation:
-   (Optional, skip when Python tag is Not for Python) Input parameters:(The names of each variable should be clear and not confusing, and correspond to the entity names in the problem)
-     variable1_name = x
-     variable2_name = y
-     .....
-     variableN_name = z
+Please:
+1. Extract the most relevant thought template
+2. Analyze the task
+3. Generate a specific solution based on the template
+4. Provide a clear, extractable final answer"""
 
-5. Answer form: (Optional, skip when there is no specific answer form)
-"""
+BUFFER_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(BUFFER_SYSTEM),
+    HumanMessagePromptTemplate.from_template(BUFFER_HUMAN)
+])
 
-META_DISTILLER_PROMPT = PromptTemplate.from_template(META_DISTILLER_TEMPLATE)
+# Reasoner Instantiation Prompt
+REASONER_SYSTEM = """You are an expert in problem analysis and can apply previous problem-solving approaches to new issues. Your goal is to analyze tasks and generate specific solutions based on thought templates. If the solution involves Python code, provide only the code in a single code block. If not, provide a clear, extractable final answer."""
 
-SIMILARITY_CHECK_TEMPLATE = """
-Find most relevant thought template in the MetaBuffer according to the given thought template, and Determine whether there is a fundamental difference in the problem-solving approach between this and the most similar thought template in MetaBuffer. If there is, output "True." If there is no fundamental difference, or if the two thought templates are highly similar, output "False."
+REASONER_HUMAN = """Distilled information:
+{query}
 
-Thought template: {thought_template}
-"""
+Please analyze the above task description and thought template, and generate a specific, detailed solution. If the solution involves Python code, only provide the code. If not, provide a clear and extractable final answer."""
 
-SIMILARITY_CHECK_PROMPT = PromptTemplate(
-    template=SIMILARITY_CHECK_TEMPLATE,
-    input_variables=["thought_template"]
-)
+REASONER_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(REASONER_SYSTEM),
+    HumanMessagePromptTemplate.from_template(REASONER_HUMAN)
+])
+
+# Inspector Prompt
+INSPECTOR_SYSTEM = """You are an excellent Python programming master proficient in analyzing and editing code."""
+
+INSPECTOR_HUMAN = """User Input: {user_input}
+Code: {code}
+Result: {result}
+
+Please analyze and edit the code to ensure it:
+1. Is syntactically correct
+2. Solves the problem correctly
+3. Follows best practices
+
+Return only the edited code in a Python code block."""
+
+INSPECTOR_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(INSPECTOR_SYSTEM),
+    HumanMessagePromptTemplate.from_template(INSPECTOR_HUMAN)
+])
+
+# Similarity Check Prompt
+SIMILARITY_CHECK_SYSTEM = """Analyze thought templates for fundamental differences in problem-solving approaches."""
+
+SIMILARITY_CHECK_HUMAN = """Compare this thought template with the most similar one in MetaBuffer:
+
+{thought_template}
+
+Output "True" if there is a fundamental difference in approach.
+Output "False" if the approaches are similar."""
+
+SIMILARITY_CHECK_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(SIMILARITY_CHECK_SYSTEM),
+    HumanMessagePromptTemplate.from_template(SIMILARITY_CHECK_HUMAN)
+])

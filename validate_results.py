@@ -48,7 +48,11 @@ if __name__ == "__main__":
                     if ast.literal_eval(result) == TARGET_VALUE:
                         correct += 1
                 except (ValueError, SyntaxError) as e:
-                    logging.warning("Failed to evaluate result: %s, error: %s", result, e)
+                    logging.warning(
+                        "Failed to evaluate result: %s, error: %s",
+                        result,
+                        e,
+                    )
                     continue
             test.append(result)
     if correct == 0:
