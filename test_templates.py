@@ -1,4 +1,4 @@
-game24='''
+game24 = """
 from itertools import permutations, product
 from sympy import symbols, simplify
 
@@ -23,8 +23,7 @@ def find_solution(numbers):
 # Example usage
 numbers = [1, 7, 10, 13]
 print(find_solution(numbers))
-'''
-
+"""
 
 
 checkmate = '''
@@ -38,7 +37,7 @@ def find_checkmate_move(moves_san):
     """
     # Initialize a new chess board
     board = chess.Board()
-    
+
     # Apply the given moves to the board
     for move_san in moves_san:
         try:
@@ -46,16 +45,16 @@ def find_checkmate_move(moves_san):
             board.push(move)
         except ValueError:
             return "Invalid move in input"
-    
+
     # Generate all possible legal moves
     for move in board.legal_moves:
         board_copy = board.copy()
         board_copy.push(move)
-        
+
         # Check if the move results in checkmate
         if board_copy.is_checkmate():
             return board.san(move)
-    
+
     return "No checkmate move found"
 
 def preprocess_input(input_str):
@@ -89,10 +88,10 @@ def sort_words(words):
     """
     # Sort the list of words alphabetically
     sorted_words = sorted(words)
-    
+
     # Join the sorted words into a single line of text separated by spaces
     sorted_line = ' '.join(sorted_words)
-    
+
     return sorted_line
 
 # Example usage

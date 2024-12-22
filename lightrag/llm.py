@@ -1,33 +1,32 @@
-import os
+import base64
 import copy
-from functools import lru_cache
 import json
+import os
+import struct
+from functools import lru_cache
+from typing import Any, Callable, Dict, List
+
 import aioboto3
 import aiohttp
 import numpy as np
 import ollama
-
+import torch
 from openai import (
-    AsyncOpenAI,
     APIConnectionError,
+    AsyncAzureOpenAI,
+    AsyncOpenAI,
     RateLimitError,
     Timeout,
-    AsyncAzureOpenAI,
 )
-
-import base64
-import struct
-
+from pydantic import BaseModel, Field
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
-from pydantic import BaseModel, Field
-from typing import List, Dict, Callable, Any
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from .base import BaseKVStorage
 from .utils import compute_args_hash, wrap_embedding_func_with_attrs
 
@@ -67,12 +66,19 @@ async def openai_complete_if_cache(
             return if_cache_return["return"]
 
     response = await openai_async_client.chat.completions.create(
-        model=model, messages=messages, **kwargs
+        model=model,
+        messages=messages,
+        **kwargs,
     )
 
     if hashing_kv is not None:
         await hashing_kv.upsert(
-            {args_hash: {"return": response.choices[0].message.content, "model": model}}
+            {
+                args_hash: {
+                    "return": response.choices[0].message.content,
+                    "model": model,
+                }
+            },
         )
     return response.choices[0].message.content
 
@@ -116,12 +122,19 @@ async def azure_openai_complete_if_cache(
             return if_cache_return["return"]
 
     response = await openai_async_client.chat.completions.create(
-        model=model, messages=messages, **kwargs
+        model=model,
+        messages=messages,
+        **kwargs,
     )
 
     if hashing_kv is not None:
         await hashing_kv.upsert(
-            {args_hash: {"return": response.choices[0].message.content, "model": model}}
+            {
+                args_hash: {
+                    "return": response.choices[0].message.content,
+                    "model": model,
+                }
+            },
         )
     return response.choices[0].message.content
 
@@ -133,7 +146,7 @@ class BedrockError(Exception):
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, max=60),
-    retry=retry_if_exception_type((BedrockError)),
+    retry=retry_if_exception_type(BedrockError),
 )
 async def bedrock_complete_if_cache(
     model,
@@ -146,13 +159,16 @@ async def bedrock_complete_if_cache(
     **kwargs,
 ) -> str:
     os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get(
-        "AWS_ACCESS_KEY_ID", aws_access_key_id
+        "AWS_ACCESS_KEY_ID",
+        aws_access_key_id,
     )
     os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get(
-        "AWS_SECRET_ACCESS_KEY", aws_secret_access_key
+        "AWS_SECRET_ACCESS_KEY",
+        aws_secret_access_key,
     )
     os.environ["AWS_SESSION_TOKEN"] = os.environ.get(
-        "AWS_SESSION_TOKEN", aws_session_token
+        "AWS_SESSION_TOKEN",
+        aws_session_token,
     )
 
     # Fix message history format
@@ -179,7 +195,7 @@ async def bedrock_complete_if_cache(
         "stop_sequences": "stopSequences",
     }
     if inference_params := list(
-        set(kwargs) & set(["max_tokens", "temperature", "top_p", "stop_sequences"])
+        set(kwargs) & set(["max_tokens", "temperature", "top_p", "stop_sequences"]),
     ):
         args["inferenceConfig"] = {}
         for param in inference_params:
@@ -208,8 +224,8 @@ async def bedrock_complete_if_cache(
                     args_hash: {
                         "return": response["output"]["message"]["content"][0]["text"],
                         "model": model,
-                    }
-                }
+                    },
+                },
             )
 
         return response["output"]["message"]["content"][0]["text"]
@@ -218,10 +234,14 @@ async def bedrock_complete_if_cache(
 @lru_cache(maxsize=1)
 def initialize_hf_model(model_name):
     hf_tokenizer = AutoTokenizer.from_pretrained(
-        model_name, device_map="auto", trust_remote_code=True
+        model_name,
+        device_map="auto",
+        trust_remote_code=True,
     )
     hf_model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", trust_remote_code=True
+        model_name,
+        device_map="auto",
+        trust_remote_code=True,
     )
     if hf_tokenizer.pad_token is None:
         hf_tokenizer.pad_token = hf_tokenizer.eos_token
@@ -230,7 +250,11 @@ def initialize_hf_model(model_name):
 
 
 async def hf_model_if_cache(
-    model, prompt, system_prompt=None, history_messages=[], **kwargs
+    model,
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     model_name = model
     hf_model, hf_tokenizer = initialize_hf_model(model_name)
@@ -249,7 +273,9 @@ async def hf_model_if_cache(
     input_prompt = ""
     try:
         input_prompt = hf_tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
         )
     except Exception:
         try:
@@ -263,7 +289,9 @@ async def hf_model_if_cache(
                 )
                 messages = messages[1:]
                 input_prompt = hf_tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
                 )
         except Exception:
             len_message = len(ori_message)
@@ -280,14 +308,21 @@ async def hf_model_if_cache(
                 )
 
     input_ids = hf_tokenizer(
-        input_prompt, return_tensors="pt", padding=True, truncation=True
+        input_prompt,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
     ).to("cuda")
     inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
     output = hf_model.generate(
-        **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+        **input_ids,
+        max_new_tokens=512,
+        num_return_sequences=1,
+        early_stopping=True,
     )
     response_text = hf_tokenizer.decode(
-        output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
+        output[0][len(inputs["input_ids"][0]) :],
+        skip_special_tokens=True,
     )
     if hashing_kv is not None:
         await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
@@ -295,7 +330,11 @@ async def hf_model_if_cache(
 
 
 async def ollama_model_if_cache(
-    model, prompt, system_prompt=None, history_messages=[], **kwargs
+    model,
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     kwargs.pop("max_tokens", None)
     kwargs.pop("response_format", None)
@@ -333,12 +372,14 @@ def initialize_lmdeploy_pipeline(
     model_format="hf",
     quant_policy=0,
 ):
-    from lmdeploy import pipeline, ChatTemplateConfig, TurbomindEngineConfig
+    from lmdeploy import ChatTemplateConfig, TurbomindEngineConfig, pipeline
 
     lmdeploy_pipe = pipeline(
         model_path=model,
         backend_config=TurbomindEngineConfig(
-            tp=tp, model_format=model_format, quant_policy=quant_policy
+            tp=tp,
+            model_format=model_format,
+            quant_policy=quant_policy,
         ),
         chat_template_config=ChatTemplateConfig(model_name=chat_template)
         if chat_template
@@ -358,37 +399,37 @@ async def lmdeploy_model_if_cache(
     quant_policy=0,
     **kwargs,
 ) -> str:
-    """
-    Args:
-        model (str): The path to the model.
-            It could be one of the following options:
-                    - i) A local directory path of a turbomind model which is
-                        converted by `lmdeploy convert` command or download
-                        from ii) and iii).
-                    - ii) The model_id of a lmdeploy-quantized model hosted
-                        inside a model repo on huggingface.co, such as
-                        "InternLM/internlm-chat-20b-4bit",
-                        "lmdeploy/llama2-chat-70b-4bit", etc.
-                    - iii) The model_id of a model hosted inside a model repo
-                        on huggingface.co, such as "internlm/internlm-chat-7b",
-                        "Qwen/Qwen-7B-Chat ", "baichuan-inc/Baichuan2-7B-Chat"
-                        and so on.
-        chat_template (str): needed when model is a pytorch model on
-            huggingface.co, such as "internlm-chat-7b",
-            "Qwen-7B-Chat ", "Baichuan2-7B-Chat" and so on,
-            and when the model name of local path did not match the original model name in HF.
-        tp (int): tensor parallel
-        prompt (Union[str, List[str]]): input texts to be completed.
-        do_preprocess (bool): whether pre-process the messages. Default to
-            True, which means chat_template will be applied.
-        skip_special_tokens (bool): Whether or not to remove special tokens
-            in the decoding. Default to be True.
-        do_sample (bool): Whether or not to use sampling, use greedy decoding otherwise.
-            Default to be False, which means greedy decoding will be applied.
+    """Args:
+    model (str): The path to the model.
+        It could be one of the following options:
+                - i) A local directory path of a turbomind model which is
+                    converted by `lmdeploy convert` command or download
+                    from ii) and iii).
+                - ii) The model_id of a lmdeploy-quantized model hosted
+                    inside a model repo on huggingface.co, such as
+                    "InternLM/internlm-chat-20b-4bit",
+                    "lmdeploy/llama2-chat-70b-4bit", etc.
+                - iii) The model_id of a model hosted inside a model repo
+                    on huggingface.co, such as "internlm/internlm-chat-7b",
+                    "Qwen/Qwen-7B-Chat ", "baichuan-inc/Baichuan2-7B-Chat"
+                    and so on.
+    chat_template (str): needed when model is a pytorch model on
+        huggingface.co, such as "internlm-chat-7b",
+        "Qwen-7B-Chat ", "Baichuan2-7B-Chat" and so on,
+        and when the model name of local path did not match the original model name in HF.
+    tp (int): tensor parallel
+    prompt (Union[str, List[str]]): input texts to be completed.
+    do_preprocess (bool): whether pre-process the messages. Default to
+        True, which means chat_template will be applied.
+    skip_special_tokens (bool): Whether or not to remove special tokens
+        in the decoding. Default to be True.
+    do_sample (bool): Whether or not to use sampling, use greedy decoding otherwise.
+        Default to be False, which means greedy decoding will be applied.
+
     """
     try:
         import lmdeploy
-        from lmdeploy import version_info, GenerationConfig
+        from lmdeploy import GenerationConfig, version_info
     except Exception:
         raise ImportError("Please install lmdeploy before intialize lmdeploy backend.")
 
@@ -404,11 +445,10 @@ async def lmdeploy_model_if_cache(
     if do_sample is not None and version < (0, 6, 0):
         raise RuntimeError(
             "`do_sample` parameter is not supported by lmdeploy until "
-            f"v0.6.0, but currently using lmdeloy {lmdeploy.__version__}"
+            f"v0.6.0, but currently using lmdeloy {lmdeploy.__version__}",
         )
-    else:
-        do_sample = True
-        gen_params.update(do_sample=do_sample)
+    do_sample = True
+    gen_params.update(do_sample=do_sample)
 
     lmdeploy_pipe = initialize_lmdeploy_pipeline(
         model=model,
@@ -454,7 +494,10 @@ async def lmdeploy_model_if_cache(
 
 
 async def gpt_4o_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     return await openai_complete_if_cache(
         "gpt-4o",
@@ -466,7 +509,10 @@ async def gpt_4o_complete(
 
 
 async def gpt_4o_mini_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     return await openai_complete_if_cache(
         "gpt-4o-mini",
@@ -478,7 +524,10 @@ async def gpt_4o_mini_complete(
 
 
 async def azure_openai_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     return await azure_openai_complete_if_cache(
         "conversation-4o-mini",
@@ -490,7 +539,10 @@ async def azure_openai_complete(
 
 
 async def bedrock_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     return await bedrock_complete_if_cache(
         "anthropic.claude-3-haiku-20240307-v1:0",
@@ -502,7 +554,10 @@ async def bedrock_complete(
 
 
 async def hf_model_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
     return await hf_model_if_cache(
@@ -515,7 +570,10 @@ async def hf_model_complete(
 
 
 async def ollama_model_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt,
+    system_prompt=None,
+    history_messages=[],
+    **kwargs,
 ) -> str:
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
     return await ollama_model_if_cache(
@@ -546,7 +604,9 @@ async def openai_embedding(
         AsyncOpenAI() if base_url is None else AsyncOpenAI(base_url=base_url)
     )
     response = await openai_async_client.embeddings.create(
-        model=model, input=texts, encoding_format="float"
+        model=model,
+        input=texts,
+        encoding_format="float",
     )
     return np.array([dp.embedding for dp in response.data])
 
@@ -575,7 +635,9 @@ async def azure_openai_embedding(
     )
 
     response = await openai_async_client.embeddings.create(
-        model=model, input=texts, encoding_format="float"
+        model=model,
+        input=texts,
+        encoding_format="float",
     )
     return np.array([dp.embedding for dp in response.data])
 
@@ -632,13 +694,16 @@ async def bedrock_embedding(
     aws_session_token=None,
 ) -> np.ndarray:
     os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get(
-        "AWS_ACCESS_KEY_ID", aws_access_key_id
+        "AWS_ACCESS_KEY_ID",
+        aws_access_key_id,
     )
     os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get(
-        "AWS_SECRET_ACCESS_KEY", aws_secret_access_key
+        "AWS_SECRET_ACCESS_KEY",
+        aws_secret_access_key,
     )
     os.environ["AWS_SESSION_TOKEN"] = os.environ.get(
-        "AWS_SESSION_TOKEN", aws_session_token
+        "AWS_SESSION_TOKEN",
+        aws_session_token,
     )
 
     session = aioboto3.Session()
@@ -652,7 +717,7 @@ async def bedrock_embedding(
                             "inputText": text,
                             # 'dimensions': embedding_dim,
                             "embeddingTypes": ["float"],
-                        }
+                        },
                     )
                 elif "v1" in model:
                     body = json.dumps({"inputText": text})
@@ -671,7 +736,7 @@ async def bedrock_embedding(
                 embed_texts.append(response_body["embedding"])
         elif model_provider == "cohere":
             body = json.dumps(
-                {"texts": texts, "input_type": "search_document", "truncate": "NONE"}
+                {"texts": texts, "input_type": "search_document", "truncate": "NONE"},
             )
 
             response = await bedrock_async_client.invoke_model(
@@ -692,7 +757,10 @@ async def bedrock_embedding(
 
 async def hf_embedding(texts: list[str], tokenizer, embed_model) -> np.ndarray:
     input_ids = tokenizer(
-        texts, return_tensors="pt", padding=True, truncation=True
+        texts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
     ).input_ids
     with torch.no_grad():
         outputs = embed_model(input_ids)
@@ -710,8 +778,7 @@ async def ollama_embedding(texts: list[str], embed_model) -> np.ndarray:
 
 
 class Model(BaseModel):
-    """
-    This is a Pydantic model class named 'Model' that is used to define a custom language model.
+    """This is a Pydantic model class named 'Model' that is used to define a custom language model.
 
     Attributes:
         gen_func (Callable[[Any], str]): A callable function that generates the response from the language model.
@@ -724,6 +791,7 @@ class Model(BaseModel):
 
     In this example, 'openai_complete_if_cache' is the callable function that generates the response from the OpenAI model.
     The 'kwargs' dictionary contains the model name and API key to be passed to the function.
+
     """
 
     gen_func: Callable[[Any], str] = Field(
@@ -740,8 +808,7 @@ class Model(BaseModel):
 
 
 class MultiModel:
-    """
-    Distributes the load across multiple language models. Useful for circumventing low rate limits with certain api providers especially if you are on the free tier.
+    """Distributes the load across multiple language models. Useful for circumventing low rate limits with certain api providers especially if you are on the free tier.
     Could also be used for spliting across diffrent models or providers.
 
     Attributes:
@@ -762,6 +829,7 @@ class MultiModel:
             / ..other args
             )
         ```
+
     """
 
     def __init__(self, models: List[Model]):
@@ -773,7 +841,11 @@ class MultiModel:
         return self._models[self._current_model]
 
     async def llm_model_func(
-        self, prompt, system_prompt=None, history_messages=[], **kwargs
+        self,
+        prompt,
+        system_prompt=None,
+        history_messages=[],
+        **kwargs,
     ) -> str:
         kwargs.pop("model", None)  # stop from overwriting the custom model name
         next_model = self._next_model()

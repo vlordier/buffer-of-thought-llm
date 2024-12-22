@@ -1,0 +1,8 @@
+[tool.ruff]
+lint.select = ["ALL"]
+lint.ignore = ["E501", "D102", "RUF001", "D100", "D212", "D101"]
+exclude = [".venv", "tests", "lightrag"]
+
+[tool.mypy]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

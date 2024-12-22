@@ -3,16 +3,17 @@ import html
 import os
 from dataclasses import dataclass
 from typing import Any, Union, cast
+
 import networkx as nx
 import numpy as np
 from nano_vectordb import NanoVectorDB
 
-from .utils import load_json, logger, write_json
 from .base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,
 )
+from .utils import load_json, logger, write_json
 
 
 @dataclass
@@ -62,14 +63,17 @@ class NanoVectorDBStorage(BaseVectorStorage):
 
     def __post_init__(self):
         self._client_file_name = os.path.join(
-            self.global_config["working_dir"], f"vdb_{self.namespace}.json"
+            self.global_config["working_dir"],
+            f"vdb_{self.namespace}.json",
         )
         self._max_batch_size = self.global_config["embedding_batch_num"]
         self._client = NanoVectorDB(
-            self.embedding_func.embedding_dim, storage_file=self._client_file_name
+            self.embedding_func.embedding_dim,
+            storage_file=self._client_file_name,
         )
         self.cosine_better_than_threshold = self.global_config.get(
-            "cosine_better_than_threshold", self.cosine_better_than_threshold
+            "cosine_better_than_threshold",
+            self.cosine_better_than_threshold,
         )
 
     async def upsert(self, data: dict[str, dict]):
@@ -90,7 +94,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
             for i in range(0, len(contents), self._max_batch_size)
         ]
         embeddings_list = await asyncio.gather(
-            *[self.embedding_func(batch) for batch in batches]
+            *[self.embedding_func(batch) for batch in batches],
         )
         embeddings = np.concatenate(embeddings_list)
         for i, d in enumerate(list_data):
@@ -126,7 +130,7 @@ class NetworkXStorage(BaseGraphStorage):
     @staticmethod
     def write_nx_graph(graph: nx.Graph, file_name):
         logger.info(
-            f"Writing graph with {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges"
+            f"Writing graph with {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges",
         )
         nx.write_graphml(graph, file_name)
 
@@ -180,12 +184,13 @@ class NetworkXStorage(BaseGraphStorage):
 
     def __post_init__(self):
         self._graphml_xml_file = os.path.join(
-            self.global_config["working_dir"], f"graph_{self.namespace}.graphml"
+            self.global_config["working_dir"],
+            f"graph_{self.namespace}.graphml",
         )
         preloaded_graph = NetworkXStorage.load_nx_graph(self._graphml_xml_file)
         if preloaded_graph is not None:
             logger.info(
-                f"Loaded graph from {self._graphml_xml_file} with {preloaded_graph.number_of_nodes()} nodes, {preloaded_graph.number_of_edges()} edges"
+                f"Loaded graph from {self._graphml_xml_file} with {preloaded_graph.number_of_nodes()} nodes, {preloaded_graph.number_of_edges()} edges",
             )
         self._graph = preloaded_graph or nx.Graph()
         self._node_embed_algorithms = {
@@ -211,7 +216,9 @@ class NetworkXStorage(BaseGraphStorage):
         return self._graph.degree(src_id) + self._graph.degree(tgt_id)
 
     async def get_edge(
-        self, source_node_id: str, target_node_id: str
+        self,
+        source_node_id: str,
+        target_node_id: str,
     ) -> Union[dict, None]:
         return self._graph.edges.get((source_node_id, target_node_id))
 
@@ -224,7 +231,10 @@ class NetworkXStorage(BaseGraphStorage):
         self._graph.add_node(node_id, **node_data)
 
     async def upsert_edge(
-        self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
+        self,
+        source_node_id: str,
+        target_node_id: str,
+        edge_data: dict[str, str],
     ):
         self._graph.add_edge(source_node_id, target_node_id, **edge_data)
 

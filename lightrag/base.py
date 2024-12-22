@@ -1,14 +1,17 @@
 from dataclasses import dataclass, field
-from typing import TypedDict, Union, Literal, Generic, TypeVar
+from typing import Generic, Literal, TypedDict, TypeVar, Union
 
 import numpy as np
 
 from .utils import EmbeddingFunc
 
-TextChunkSchema = TypedDict(
-    "TextChunkSchema",
-    {"tokens": int, "content": str, "full_doc_id": str, "chunk_order_index": int},
-)
+
+class TextChunkSchema(TypedDict):
+    tokens: int
+    content: str
+    full_doc_id: str
+    chunk_order_index: int
+
 
 T = TypeVar("T")
 
@@ -34,12 +37,10 @@ class StorageNameSpace:
     global_config: dict
 
     async def index_done_callback(self):
-        """commit the storage operations after indexing"""
-        pass
+        """Commit the storage operations after indexing"""
 
     async def query_done_callback(self):
-        """commit the storage operations after querying"""
-        pass
+        """Commit the storage operations after querying"""
 
 
 @dataclass
@@ -66,12 +67,14 @@ class BaseKVStorage(Generic[T], StorageNameSpace):
         raise NotImplementedError
 
     async def get_by_ids(
-        self, ids: list[str], fields: Union[set[str], None] = None
+        self,
+        ids: list[str],
+        fields: Union[set[str], None] = None,
     ) -> list[Union[T, None]]:
         raise NotImplementedError
 
     async def filter_keys(self, data: list[str]) -> set[str]:
-        """return un-exist keys"""
+        """Return un-exist keys"""
         raise NotImplementedError
 
     async def upsert(self, data: dict[str, T]):
@@ -99,12 +102,15 @@ class BaseGraphStorage(StorageNameSpace):
         raise NotImplementedError
 
     async def get_edge(
-        self, source_node_id: str, target_node_id: str
+        self,
+        source_node_id: str,
+        target_node_id: str,
     ) -> Union[dict, None]:
         raise NotImplementedError
 
     async def get_node_edges(
-        self, source_node_id: str
+        self,
+        source_node_id: str,
     ) -> Union[list[tuple[str, str]], None]:
         raise NotImplementedError
 
@@ -112,7 +118,10 @@ class BaseGraphStorage(StorageNameSpace):
         raise NotImplementedError
 
     async def upsert_edge(
-        self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
+        self,
+        source_node_id: str,
+        target_node_id: str,
+        edge_data: dict[str, str],
     ):
         raise NotImplementedError
 

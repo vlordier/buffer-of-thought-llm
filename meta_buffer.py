@@ -1,32 +1,64 @@
-import os
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from lightrag import LightRAG, QueryParam
-from lightrag.llm import gpt_4o_mini_complete, gpt_4o_complete,openai_complete_if_cache,openai_embedding,hf_model_complete
-import numpy as np
-from lightrag.utils import EmbeddingFunc, compute_args_hash
+from lightrag.llm import openai_complete_if_cache, openai_embedding
+from lightrag.utils import EmbeddingFunc
+
+if TYPE_CHECKING:
+    import numpy as np
+
 
 class MetaBuffer:
-    def __init__(self,llm_model,embedding_model,api_key=None,base_url="https://api.openai.com/v1/",rag_dir='./test'):
+    """A buffer for managing meta-learning and retrieval operations."""
+
+    def __init__(
+        self,
+        llm_model: str,
+        embedding_model: str,
+        api_key: str | None = None,
+        base_url: str = "https://api.openai.com/v1/",
+        rag_dir: str = "./test",
+    ) -> None:
+        """
+        Initialize MetaBuffer with model and configuration parameters.
+
+        Args:
+            llm_model: Language model identifier
+            embedding_model: Embedding model identifier
+            api_key: Optional API key for authentication
+            base_url: Base URL for API endpoints
+            rag_dir: Directory for RAG storage
+
+        """
         self.api_key = api_key
         self.llm = llm_model
         self.embedding_model = embedding_model
         self.base_url = base_url
-        if not os.path.exists(rag_dir):
-            os.mkdir(rag_dir)
+        rag_path = Path(rag_dir)
+        if not rag_path.exists():
+            rag_path.mkdir(parents=True, exist_ok=True)
         self.rag = LightRAG(
-        working_dir= rag_dir,
-        llm_model_func=self.llm_model_func,  # Use Hugging Face model for text generation
-        # llm_model_name='../../models/Qwen2.5-Math-7B-Instruct',  # Model name from Hugging Face
-        embedding_func=EmbeddingFunc(
-            embedding_dim=3072,
-            max_token_size=8192,
-            func=self.embedding_func
+            working_dir=rag_dir,
+            llm_model_func=self.llm_model_func,
+            embedding_func=EmbeddingFunc(
+                embedding_dim=3072,
+                max_token_size=8192,
+                func=self.embedding_func,
+            ),
         )
-    )
-        
-       
+
     async def llm_model_func(
-        self, prompt, system_prompt=None, history_messages=[], **kwargs
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+        **kwargs: dict[str, str | int | float | bool],
     ) -> str:
+        if history_messages is None:
+            history_messages = []
         return await openai_complete_if_cache(
             self.llm,
             prompt,
@@ -34,52 +66,56 @@ class MetaBuffer:
             history_messages=history_messages,
             api_key=self.api_key,
             base_url=self.base_url,
-            **kwargs
+            **kwargs,
         )
+
     async def embedding_func(self, texts: list[str]) -> np.ndarray:
-        
         return await openai_embedding(
             texts,
-            model= self.embedding_model,
-            api_key= self.api_key,
-            base_url= self.base_url
+            model=self.embedding_model,
+            api_key=self.api_key,
+            base_url=self.base_url,
         )
-    
-    def retrieve_and_instantiate(self,input):
-        response = self.rag.query(input, param=QueryParam(mode="hybrid"))
-        return response
-    
-    def dynamic_update(self,thought_template):
+
+    def retrieve_and_instantiate(self, query_text: str) -> str:
+        return self.rag.query(query_text, param=QueryParam(mode="hybrid"))
+
+    def dynamic_update(self, thought_template: str) -> None:
         prompt = """
 Find most relevant thought template in the MetaBuffer according to the given thought template, and Determine whether there is a fundamental difference in the problem-solving approach between this and the most similar thought template in MetaBuffer. If there is, output "True." If there is no fundamental difference, or if the two thought templates are highly similar, output "False."
 """
-        input = prompt + thought_template
-        # Perform naive search
-        response = self.rag.query(input, param=QueryParam(mode="hybrid"))
-        print(response)
+        query_text = prompt + thought_template
+        response = self.rag.query(query_text, param=QueryParam(mode="hybrid"))
         if self.extract_similarity_decision(response):
-            print('MetaBuffer Updated!')
             self.rag.insert(thought_template)
         else:
-            print('No need to Update!')
+            pass
 
-        
-    def extract_similarity_decision(self,text):
+    def extract_similarity_decision(self, text: str) -> bool:
         """
-        This function takes the input text of an example and extracts the final decision
-        on whether the templates are similar or not (True or False).
+        Extract similarity decision from response text.
+
+        Parse the input text and determine if it indicates similarity
+        between templates based on True/False markers.
+
+        Args:
+            text: Response text to analyze
+
+        Returns:
+            bool: True if templates are similar, False otherwise
+
+        Raises:
+            ValueError: If no valid True/False conclusion is found
+
         """
         # Convert the text to lowercase for easier matching
         text = text.lower()
-        
+
         # Look for the conclusion part where the decision is made
         if "false" in text:
             return False
-        elif "true" in text:
+        if "true" in text:
             return True
-        else:
-            # In case no valid conclusion is found
-            raise ValueError("No valid conclusion (True/False) found in the text.")
-        
-        
-    
+        # In case no valid conclusion is found
+        msg = "No valid conclusion (True/False) found in the text."
+        raise ValueError(msg)

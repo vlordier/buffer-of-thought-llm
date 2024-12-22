@@ -5,6 +5,13 @@ from datetime import datetime
 from functools import partial
 from typing import Type, cast
 
+from .base import (
+    BaseGraphStorage,
+    BaseKVStorage,
+    BaseVectorStorage,
+    QueryParam,
+    StorageNameSpace,
+)
 from .llm import (
     gpt_4o_mini_complete,
     openai_embedding,
@@ -12,12 +19,11 @@ from .llm import (
 from .operate import (
     chunking_by_token_size,
     extract_entities,
-    local_query,
     global_query,
     hybrid_query,
+    local_query,
     naive_query,
 )
-
 from .storage import (
     JsonKVStorage,
     NanoVectorDBStorage,
@@ -26,17 +32,10 @@ from .storage import (
 from .utils import (
     EmbeddingFunc,
     compute_mdhash_id,
-    limit_async_func_call,
     convert_response_to_json,
+    limit_async_func_call,
     logger,
     set_logger,
-)
-from .base import (
-    BaseGraphStorage,
-    BaseKVStorage,
-    BaseVectorStorage,
-    StorageNameSpace,
-    QueryParam,
 )
 
 
@@ -53,7 +52,7 @@ def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
 @dataclass
 class LightRAG:
     working_dir: str = field(
-        default_factory=lambda: f"./lightrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
+        default_factory=lambda: f"./lightrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}",
     )
 
     # text chunking
@@ -75,7 +74,7 @@ class LightRAG:
             "window_size": 2,
             "iterations": 3,
             "random_seed": 3,
-        }
+        },
     )
 
     # embedding_func: EmbeddingFunc = field(default_factory=lambda:hf_embedding)
@@ -113,26 +112,30 @@ class LightRAG:
             os.makedirs(self.working_dir)
 
         self.full_docs = self.key_string_value_json_storage_cls(
-            namespace="full_docs", global_config=asdict(self)
+            namespace="full_docs",
+            global_config=asdict(self),
         )
 
         self.text_chunks = self.key_string_value_json_storage_cls(
-            namespace="text_chunks", global_config=asdict(self)
+            namespace="text_chunks",
+            global_config=asdict(self),
         )
 
         self.llm_response_cache = (
             self.key_string_value_json_storage_cls(
-                namespace="llm_response_cache", global_config=asdict(self)
+                namespace="llm_response_cache",
+                global_config=asdict(self),
             )
             if self.enable_llm_cache
             else None
         )
         self.chunk_entity_relation_graph = self.graph_storage_cls(
-            namespace="chunk_entity_relation", global_config=asdict(self)
+            namespace="chunk_entity_relation",
+            global_config=asdict(self),
         )
 
         self.embedding_func = limit_async_func_call(self.embedding_func_max_async)(
-            self.embedding_func
+            self.embedding_func,
         )
 
         self.entities_vdb = self.vector_db_storage_cls(
@@ -154,7 +157,7 @@ class LightRAG:
         )
 
         self.llm_model_func = limit_async_func_call(self.llm_model_max_async)(
-            partial(self.llm_model_func, hashing_kv=self.llm_response_cache)
+            partial(self.llm_model_func, hashing_kv=self.llm_response_cache),
         )
 
     def insert(self, string_or_strings):
@@ -193,7 +196,7 @@ class LightRAG:
                 }
                 inserting_chunks.update(chunks)
             _add_chunk_keys = await self.text_chunks.filter_keys(
-                list(inserting_chunks.keys())
+                list(inserting_chunks.keys()),
             )
             inserting_chunks = {
                 k: v for k, v in inserting_chunks.items() if k in _add_chunk_keys

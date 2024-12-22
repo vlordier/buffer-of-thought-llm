@@ -1,5 +1,7 @@
-import re
+from __future__ import annotations
+
 import io
+import re
 import sys
 
 meta_distiller_prompt = """
@@ -38,12 +40,21 @@ Distilled Information:
 5. Answer form: (Optional, skip when there is no specific answer form)
 
   **Note: The generation ends here. Do not show this message in your answer !**
-  
+
 """
 
 
+def extract_and_execute_code(text: str) -> tuple[str, str | None]:
+    """
+    Extract and execute Python code from markdown-style text.
 
-def extract_and_execute_code(text):
+    Args:
+        text: Input text containing markdown-formatted Python code
+
+    Returns:
+        Tuple containing (execution output or error message, extracted code if found)
+
+    """
     # Possible start and end markers
     code_start_markers = ["```python", "```Python", "```"]
     code_end_marker = "```"
@@ -60,41 +71,57 @@ def extract_and_execute_code(text):
     # If find code
     if code_start_index != -1:
         # Try to find the end point
-        code_end_index = text.find(code_end_marker, code_start_index + len(code_start_marker_used))
-        
+        code_end_index = text.find(
+            code_end_marker,
+            code_start_index + len(code_start_marker_used),
+        )
+
         # If not, we assume the code is appended to the end of the text
         if code_end_index == -1:
             code_end_index = len(text)
-        
+
         # Extract the code
-        code_str = text[code_start_index + len(code_start_marker_used):code_end_index].strip()
-        
+        code_str = text[
+            code_start_index + len(code_start_marker_used) : code_end_index
+        ].strip()
+
         # Clean up the code string
         for marker in code_start_markers:
             code_str = code_str.replace(marker, "")
         code_str = code_str.replace(code_end_marker, "").strip()
-        
+
         # Create a stream
         old_stdout = sys.stdout
         new_stdout = io.StringIO()
         sys.stdout = new_stdout
-        
+
         # Execute the code
         try:
-            exec(code_str, globals())
-        except Exception as e:
+            # Note: exec is required here for dynamic code evaluation
+            # nosec B102
+            exec(code_str, globals())  # noqa: S102
+        except (SyntaxError, NameError, TypeError, ValueError, AttributeError) as e:
             # Primary output
             sys.stdout = old_stdout
             return f"An error occurred: {e}", code_str
-        
+
         # Extract the output
         sys.stdout = old_stdout
         return new_stdout.getvalue(), code_str
-    else:
-        return "No Python code found in the provided string.", None
+    return "No Python code found in the provided string.", None
 
 
-def extract_answer(text):
+def extract_answer(text: str) -> str | None:
+    """
+    Extract answer content from text using regex pattern matching.
+
+    Args:
+        text: Input text to search for answer
+
+    Returns:
+        Extracted answer text if found, None otherwise
+
+    """
     # Define a regular expression pattern to match the answer format
     # The pattern accounts for variations in spacing and line breaks
     pattern = re.compile(r"Answer:\s*(.*?)\s*$", re.DOTALL)
@@ -104,4 +131,3 @@ def extract_answer(text):
 
     # If a match is found, return the content; otherwise, return None
     return match.group(1).strip() if match else None
-

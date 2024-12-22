@@ -1,48 +1,53 @@
 import asyncio
 import json
 import re
-from typing import Union
-from collections import Counter, defaultdict
 import warnings
+from collections import Counter, defaultdict
+from typing import Union
+
+from .base import (
+    BaseGraphStorage,
+    BaseKVStorage,
+    BaseVectorStorage,
+    QueryParam,
+    TextChunkSchema,
+)
+from .prompt import GRAPH_FIELD_SEP, PROMPTS
 from .utils import (
-    logger,
     clean_str,
     compute_mdhash_id,
     decode_tokens_by_tiktoken,
     encode_string_by_tiktoken,
     is_float_regex,
     list_of_list_to_csv,
+    logger,
     pack_user_ass_to_openai_messages,
     split_string_by_multi_markers,
     truncate_list_by_token_size,
 )
-from .base import (
-    BaseGraphStorage,
-    BaseKVStorage,
-    BaseVectorStorage,
-    TextChunkSchema,
-    QueryParam,
-)
-from .prompt import GRAPH_FIELD_SEP, PROMPTS
 
 
 def chunking_by_token_size(
-    content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
+    content: str,
+    overlap_token_size=128,
+    max_token_size=1024,
+    tiktoken_model="gpt-4o",
 ):
     tokens = encode_string_by_tiktoken(content, model_name=tiktoken_model)
     results = []
     for index, start in enumerate(
-        range(0, len(tokens), max_token_size - overlap_token_size)
+        range(0, len(tokens), max_token_size - overlap_token_size),
     ):
         chunk_content = decode_tokens_by_tiktoken(
-            tokens[start : start + max_token_size], model_name=tiktoken_model
+            tokens[start : start + max_token_size],
+            model_name=tiktoken_model,
         )
         results.append(
             {
                 "tokens": min(max_token_size, len(tokens) - start),
                 "content": chunk_content.strip(),
                 "chunk_order_index": index,
-            }
+            },
         )
     return results
 
@@ -62,7 +67,8 @@ async def _handle_entity_relation_summary(
         return description
     prompt_template = PROMPTS["summarize_entity_descriptions"]
     use_description = decode_tokens_by_tiktoken(
-        tokens[:llm_max_tokens], model_name=tiktoken_model_name
+        tokens[:llm_max_tokens],
+        model_name=tiktoken_model_name,
     )
     context_base = dict(
         entity_name=entity_or_relation_name,
@@ -135,25 +141,27 @@ async def _merge_nodes_then_upsert(
     if already_node is not None:
         already_entitiy_types.append(already_node["entity_type"])
         already_source_ids.extend(
-            split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
+            split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP]),
         )
         already_description.append(already_node["description"])
 
     entity_type = sorted(
         Counter(
-            [dp["entity_type"] for dp in nodes_data] + already_entitiy_types
+            [dp["entity_type"] for dp in nodes_data] + already_entitiy_types,
         ).items(),
         key=lambda x: x[1],
         reverse=True,
     )[0][0]
     description = GRAPH_FIELD_SEP.join(
-        sorted(set([dp["description"] for dp in nodes_data] + already_description))
+        sorted(set([dp["description"] for dp in nodes_data] + already_description)),
     )
     source_id = GRAPH_FIELD_SEP.join(
-        set([dp["source_id"] for dp in nodes_data] + already_source_ids)
+        set([dp["source_id"] for dp in nodes_data] + already_source_ids),
     )
     description = await _handle_entity_relation_summary(
-        entity_name, description, global_config
+        entity_name,
+        description,
+        global_config,
     )
     node_data = dict(
         entity_type=entity_type,
@@ -184,22 +192,22 @@ async def _merge_edges_then_upsert(
         already_edge = await knowledge_graph_inst.get_edge(src_id, tgt_id)
         already_weights.append(already_edge["weight"])
         already_source_ids.extend(
-            split_string_by_multi_markers(already_edge["source_id"], [GRAPH_FIELD_SEP])
+            split_string_by_multi_markers(already_edge["source_id"], [GRAPH_FIELD_SEP]),
         )
         already_description.append(already_edge["description"])
         already_keywords.extend(
-            split_string_by_multi_markers(already_edge["keywords"], [GRAPH_FIELD_SEP])
+            split_string_by_multi_markers(already_edge["keywords"], [GRAPH_FIELD_SEP]),
         )
 
     weight = sum([dp["weight"] for dp in edges_data] + already_weights)
     description = GRAPH_FIELD_SEP.join(
-        sorted(set([dp["description"] for dp in edges_data] + already_description))
+        sorted(set([dp["description"] for dp in edges_data] + already_description)),
     )
     keywords = GRAPH_FIELD_SEP.join(
-        sorted(set([dp["keywords"] for dp in edges_data] + already_keywords))
+        sorted(set([dp["keywords"] for dp in edges_data] + already_keywords)),
     )
     source_id = GRAPH_FIELD_SEP.join(
-        set([dp["source_id"] for dp in edges_data] + already_source_ids)
+        set([dp["source_id"] for dp in edges_data] + already_source_ids),
     )
     for need_insert_id in [src_id, tgt_id]:
         if not (await knowledge_graph_inst.has_node(need_insert_id)):
@@ -212,7 +220,9 @@ async def _merge_edges_then_upsert(
                 },
             )
     description = await _handle_entity_relation_summary(
-        (src_id, tgt_id), description, global_config
+        (src_id, tgt_id),
+        description,
+        global_config,
     )
     await knowledge_graph_inst.upsert_edge(
         src_id,
@@ -279,7 +289,8 @@ async def extract_entities(
                 break
 
             if_loop_result: str = await use_llm_func(
-                if_loop_prompt, history_messages=history
+                if_loop_prompt,
+                history_messages=history,
             )
             if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
             if if_loop_result != "yes":
@@ -298,21 +309,24 @@ async def extract_entities(
                 continue
             record = record.group(1)
             record_attributes = split_string_by_multi_markers(
-                record, [context_base["tuple_delimiter"]]
+                record,
+                [context_base["tuple_delimiter"]],
             )
             if_entities = await _handle_single_entity_extraction(
-                record_attributes, chunk_key
+                record_attributes,
+                chunk_key,
             )
             if if_entities is not None:
                 maybe_nodes[if_entities["entity_name"]].append(if_entities)
                 continue
 
             if_relation = await _handle_single_relationship_extraction(
-                record_attributes, chunk_key
+                record_attributes,
+                chunk_key,
             )
             if if_relation is not None:
                 maybe_edges[(if_relation["src_id"], if_relation["tgt_id"])].append(
-                    if_relation
+                    if_relation,
                 )
         already_processed += 1
         already_entities += len(maybe_nodes)
@@ -329,7 +343,7 @@ async def extract_entities(
 
     # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
     results = await asyncio.gather(
-        *[_process_single_content(c) for c in ordered_chunks]
+        *[_process_single_content(c) for c in ordered_chunks],
     )
     print()  # clear the progress bar
     maybe_nodes = defaultdict(list)
@@ -343,20 +357,20 @@ async def extract_entities(
         *[
             _merge_nodes_then_upsert(k, v, knowledge_graph_inst, global_config)
             for k, v in maybe_nodes.items()
-        ]
+        ],
     )
     all_relationships_data = await asyncio.gather(
         *[
             _merge_edges_then_upsert(k[0], k[1], v, knowledge_graph_inst, global_config)
             for k, v in maybe_edges.items()
-        ]
+        ],
     )
     if not len(all_entities_data):
         logger.warning("Didn't extract any entities, maybe your LLM is not working")
         return None
     if not len(all_relationships_data):
         logger.warning(
-            "Didn't extract any relationships, maybe your LLM is not working"
+            "Didn't extract any relationships, maybe your LLM is not working",
         )
         return None
 
@@ -438,7 +452,8 @@ async def local_query(
         return PROMPTS["fail_response"]
     sys_prompt_temp = PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
+        context_data=context,
+        response_type=query_param.response_type,
     )
     response = await use_model_func(
         query,
@@ -469,12 +484,12 @@ async def _build_local_query_context(
     if not len(results):
         return None
     node_datas = await asyncio.gather(
-        *[knowledge_graph_inst.get_node(r["entity_name"]) for r in results]
+        *[knowledge_graph_inst.get_node(r["entity_name"]) for r in results],
     )
     if not all([n is not None for n in node_datas]):
         logger.warning("Some nodes are missing, maybe the storage is damaged")
     node_degrees = await asyncio.gather(
-        *[knowledge_graph_inst.node_degree(r["entity_name"]) for r in results]
+        *[knowledge_graph_inst.node_degree(r["entity_name"]) for r in results],
     )
     node_datas = [
         {**n, "entity_name": k["entity_name"], "rank": d}
@@ -482,13 +497,18 @@ async def _build_local_query_context(
         if n is not None
     ]
     use_text_units = await _find_most_related_text_unit_from_entities(
-        node_datas, query_param, text_chunks_db, knowledge_graph_inst
+        node_datas,
+        query_param,
+        text_chunks_db,
+        knowledge_graph_inst,
     )
     use_relations = await _find_most_related_edges_from_entities(
-        node_datas, query_param, knowledge_graph_inst
+        node_datas,
+        query_param,
+        knowledge_graph_inst,
     )
     logger.info(
-        f"Local query uses {len(node_datas)} entites, {len(use_relations)} relations, {len(use_text_units)} text units"
+        f"Local query uses {len(node_datas)} entites, {len(use_relations)} relations, {len(use_text_units)} text units",
     )
     entites_section_list = [["id", "entity", "type", "description", "rank"]]
     for i, n in enumerate(node_datas):
@@ -499,12 +519,12 @@ async def _build_local_query_context(
                 n.get("entity_type", "UNKNOWN"),
                 n.get("description", "UNKNOWN"),
                 n["rank"],
-            ]
+            ],
         )
     entities_context = list_of_list_to_csv(entites_section_list)
 
     relations_section_list = [
-        ["id", "source", "target", "description", "keywords", "weight", "rank"]
+        ["id", "source", "target", "description", "keywords", "weight", "rank"],
     ]
     for i, e in enumerate(use_relations):
         relations_section_list.append(
@@ -516,7 +536,7 @@ async def _build_local_query_context(
                 e["keywords"],
                 e["weight"],
                 e["rank"],
-            ]
+            ],
         )
     relations_context = list_of_list_to_csv(relations_section_list)
 
@@ -551,7 +571,7 @@ async def _find_most_related_text_unit_from_entities(
         for dp in node_datas
     ]
     edges = await asyncio.gather(
-        *[knowledge_graph_inst.get_node_edges(dp["entity_name"]) for dp in node_datas]
+        *[knowledge_graph_inst.get_node_edges(dp["entity_name"]) for dp in node_datas],
     )
     all_one_hop_nodes = set()
     for this_edges in edges:
@@ -560,7 +580,7 @@ async def _find_most_related_text_unit_from_entities(
         all_one_hop_nodes.update([e[1] for e in this_edges])
     all_one_hop_nodes = list(all_one_hop_nodes)
     all_one_hop_nodes_data = await asyncio.gather(
-        *[knowledge_graph_inst.get_node(e) for e in all_one_hop_nodes]
+        *[knowledge_graph_inst.get_node(e) for e in all_one_hop_nodes],
     )
     all_one_hop_text_units_lookup = {
         k: set(split_string_by_multi_markers(v["source_id"], [GRAPH_FIELD_SEP]))
@@ -590,7 +610,8 @@ async def _find_most_related_text_unit_from_entities(
         {"id": k, **v} for k, v in all_text_units_lookup.items() if v is not None
     ]
     all_text_units = sorted(
-        all_text_units, key=lambda x: (x["order"], -x["relation_counts"])
+        all_text_units,
+        key=lambda x: (x["order"], -x["relation_counts"]),
     )
     all_text_units = truncate_list_by_token_size(
         all_text_units,
@@ -607,17 +628,17 @@ async def _find_most_related_edges_from_entities(
     knowledge_graph_inst: BaseGraphStorage,
 ):
     all_related_edges = await asyncio.gather(
-        *[knowledge_graph_inst.get_node_edges(dp["entity_name"]) for dp in node_datas]
+        *[knowledge_graph_inst.get_node_edges(dp["entity_name"]) for dp in node_datas],
     )
     all_edges = set()
     for this_edges in all_related_edges:
         all_edges.update([tuple(sorted(e)) for e in this_edges])
     all_edges = list(all_edges)
     all_edges_pack = await asyncio.gather(
-        *[knowledge_graph_inst.get_edge(e[0], e[1]) for e in all_edges]
+        *[knowledge_graph_inst.get_edge(e[0], e[1]) for e in all_edges],
     )
     all_edges_degree = await asyncio.gather(
-        *[knowledge_graph_inst.edge_degree(e[0], e[1]) for e in all_edges]
+        *[knowledge_graph_inst.edge_degree(e[0], e[1]) for e in all_edges],
     )
     all_edges_data = [
         {"src_tgt": k, "rank": d, **v}
@@ -625,7 +646,9 @@ async def _find_most_related_edges_from_entities(
         if v is not None
     ]
     all_edges_data = sorted(
-        all_edges_data, key=lambda x: (x["rank"], x["weight"]), reverse=True
+        all_edges_data,
+        key=lambda x: (x["rank"], x["weight"]),
+        reverse=True,
     )
     all_edges_data = truncate_list_by_token_size(
         all_edges_data,
@@ -690,7 +713,8 @@ async def global_query(
 
     sys_prompt_temp = PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
+        context_data=context,
+        response_type=query_param.response_type,
     )
     response = await use_model_func(
         query,
@@ -724,13 +748,13 @@ async def _build_global_query_context(
         return None
 
     edge_datas = await asyncio.gather(
-        *[knowledge_graph_inst.get_edge(r["src_id"], r["tgt_id"]) for r in results]
+        *[knowledge_graph_inst.get_edge(r["src_id"], r["tgt_id"]) for r in results],
     )
 
     if not all([n is not None for n in edge_datas]):
         logger.warning("Some edges are missing, maybe the storage is damaged")
     edge_degree = await asyncio.gather(
-        *[knowledge_graph_inst.edge_degree(r["src_id"], r["tgt_id"]) for r in results]
+        *[knowledge_graph_inst.edge_degree(r["src_id"], r["tgt_id"]) for r in results],
     )
     edge_datas = [
         {"src_id": k["src_id"], "tgt_id": k["tgt_id"], "rank": d, **v}
@@ -738,7 +762,9 @@ async def _build_global_query_context(
         if v is not None
     ]
     edge_datas = sorted(
-        edge_datas, key=lambda x: (x["rank"], x["weight"]), reverse=True
+        edge_datas,
+        key=lambda x: (x["rank"], x["weight"]),
+        reverse=True,
     )
     edge_datas = truncate_list_by_token_size(
         edge_datas,
@@ -747,16 +773,21 @@ async def _build_global_query_context(
     )
 
     use_entities = await _find_most_related_entities_from_relationships(
-        edge_datas, query_param, knowledge_graph_inst
+        edge_datas,
+        query_param,
+        knowledge_graph_inst,
     )
     use_text_units = await _find_related_text_unit_from_relationships(
-        edge_datas, query_param, text_chunks_db, knowledge_graph_inst
+        edge_datas,
+        query_param,
+        text_chunks_db,
+        knowledge_graph_inst,
     )
     logger.info(
-        f"Global query uses {len(use_entities)} entites, {len(edge_datas)} relations, {len(use_text_units)} text units"
+        f"Global query uses {len(use_entities)} entites, {len(edge_datas)} relations, {len(use_text_units)} text units",
     )
     relations_section_list = [
-        ["id", "source", "target", "description", "keywords", "weight", "rank"]
+        ["id", "source", "target", "description", "keywords", "weight", "rank"],
     ]
     for i, e in enumerate(edge_datas):
         relations_section_list.append(
@@ -768,7 +799,7 @@ async def _build_global_query_context(
                 e["keywords"],
                 e["weight"],
                 e["rank"],
-            ]
+            ],
         )
     relations_context = list_of_list_to_csv(relations_section_list)
 
@@ -781,7 +812,7 @@ async def _build_global_query_context(
                 n.get("entity_type", "UNKNOWN"),
                 n.get("description", "UNKNOWN"),
                 n["rank"],
-            ]
+            ],
         )
     entities_context = list_of_list_to_csv(entites_section_list)
 
@@ -817,11 +848,14 @@ async def _find_most_related_entities_from_relationships(
         entity_names.add(e["tgt_id"])
 
     node_datas = await asyncio.gather(
-        *[knowledge_graph_inst.get_node(entity_name) for entity_name in entity_names]
+        *[knowledge_graph_inst.get_node(entity_name) for entity_name in entity_names],
     )
 
     node_degrees = await asyncio.gather(
-        *[knowledge_graph_inst.node_degree(entity_name) for entity_name in entity_names]
+        *[
+            knowledge_graph_inst.node_degree(entity_name)
+            for entity_name in entity_names
+        ],
     )
     node_datas = [
         {**n, "entity_name": k, "rank": d}
@@ -945,7 +979,8 @@ async def hybrid_query(
 
     sys_prompt_temp = PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
+        context_data=context,
+        response_type=query_param.response_type,
     )
     response = await use_model_func(
         query,
@@ -969,13 +1004,19 @@ def combine_contexts(high_level_context, low_level_context):
 
     def extract_sections(context):
         entities_match = re.search(
-            r"-----Entities-----\s*```csv\s*(.*?)\s*```", context, re.DOTALL
+            r"-----Entities-----\s*```csv\s*(.*?)\s*```",
+            context,
+            re.DOTALL,
         )
         relationships_match = re.search(
-            r"-----Relationships-----\s*```csv\s*(.*?)\s*```", context, re.DOTALL
+            r"-----Relationships-----\s*```csv\s*(.*?)\s*```",
+            context,
+            re.DOTALL,
         )
         sources_match = re.search(
-            r"-----Sources-----\s*```csv\s*(.*?)\s*```", context, re.DOTALL
+            r"-----Sources-----\s*```csv\s*(.*?)\s*```",
+            context,
+            re.DOTALL,
         )
 
         entities = entities_match.group(1) if entities_match else ""
@@ -988,7 +1029,7 @@ def combine_contexts(high_level_context, low_level_context):
 
     if high_level_context is None:
         warnings.warn(
-            "High Level context is None. Return empty High entity/relationship/source"
+            "High Level context is None. Return empty High entity/relationship/source",
         )
         hl_entities, hl_relationships, hl_sources = "", "", ""
     else:
@@ -996,7 +1037,7 @@ def combine_contexts(high_level_context, low_level_context):
 
     if low_level_context is None:
         warnings.warn(
-            "Low Level context is None. Return empty Low entity/relationship/source"
+            "Low Level context is None. Return empty Low entity/relationship/source",
         )
         ll_entities, ll_relationships, ll_sources = "", "", ""
     else:
@@ -1004,7 +1045,7 @@ def combine_contexts(high_level_context, low_level_context):
 
     # Combine and deduplicate the entities
     combined_entities_set = set(
-        filter(None, hl_entities.strip().split("\n") + ll_entities.strip().split("\n"))
+        filter(None, hl_entities.strip().split("\n") + ll_entities.strip().split("\n")),
     )
     combined_entities = "\n".join(combined_entities_set)
 
@@ -1013,13 +1054,13 @@ def combine_contexts(high_level_context, low_level_context):
         filter(
             None,
             hl_relationships.strip().split("\n") + ll_relationships.strip().split("\n"),
-        )
+        ),
     )
     combined_relationships = "\n".join(combined_relationships_set)
 
     # Combine and deduplicate the sources
     combined_sources_set = set(
-        filter(None, hl_sources.strip().split("\n") + ll_sources.strip().split("\n"))
+        filter(None, hl_sources.strip().split("\n") + ll_sources.strip().split("\n")),
     )
     combined_sources = "\n".join(combined_sources_set)
 
@@ -1060,7 +1101,8 @@ async def naive_query(
         return section
     sys_prompt_temp = PROMPTS["naive_rag_response"]
     sys_prompt = sys_prompt_temp.format(
-        content_data=section, response_type=query_param.response_type
+        content_data=section,
+        response_type=query_param.response_type,
     )
     response = await use_model_func(
         query,

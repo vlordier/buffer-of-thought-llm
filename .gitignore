@@ -1,0 +1,13 @@
+.aider*
+.env
+.venv
+.mypy_cache
+.pytest_cache
+__pycache__
+.ruff_cache/
+
+*.pyc
+.DS_Store
+*.egg-info
+*.egg
+*.egg-info/

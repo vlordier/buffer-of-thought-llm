@@ -4,11 +4,11 @@ import json
 import logging
 import os
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
 from typing import Any, Union
-import xml.etree.ElementTree as ET
 
 import numpy as np
 import tiktoken
@@ -25,7 +25,7 @@ def set_logger(log_file: str):
     file_handler.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     file_handler.setFormatter(formatter)
 
@@ -48,8 +48,7 @@ def locate_json_string_body_from_string(content: str) -> Union[str, None]:
     maybe_json_str = re.search(r"{.*}", content, re.DOTALL)
     if maybe_json_str is not None:
         return maybe_json_str.group(0)
-    else:
-        return None
+    return None
 
 
 def convert_response_to_json(response: str) -> dict:
@@ -177,7 +176,7 @@ def truncate_list_by_token_size(list_data: list, key: callable, max_token_size: 
 
 def list_of_list_to_csv(data: list[list]):
     return "\n".join(
-        [",\t".join([str(data_dd) for data_dd in data_d]) for data_d in data]
+        [",\t".join([str(data_dd) for data_dd in data_d]) for data_d in data],
     )
 
 
